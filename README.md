@@ -15,8 +15,8 @@ This pipeline converts 2D videos to 3D using depth maps and ProPainter for inpai
 
 1. Clone this repository with submodules:
 ```bash
-git clone --recursive <your-repo-url>
-cd <your-repo-name>
+git clone --recursive <https://github.com/bharathkalyangedela/2d-3d-pipeline.git>
+cd <2d-3d-pipeline.git>
 ```
 
 2. Install dependencies:

@@ -382,8 +382,10 @@ def create_anaglyph(left_dir, right_dir, output_path):
     # Create temporary directories for frames
     temp_left = os.path.join(os.path.dirname(output_path), 'temp_left')
     temp_right = os.path.join(os.path.dirname(output_path), 'temp_right')
+    temp_anaglyph = os.path.join(os.path.dirname(output_path), 'temp_anaglyph')
     os.makedirs(temp_left, exist_ok=True)
     os.makedirs(temp_right, exist_ok=True)
+    os.makedirs(temp_anaglyph, exist_ok=True)
     
     try:
         # Extract frames from videos
@@ -411,18 +413,9 @@ def create_anaglyph(left_dir, right_dir, output_path):
         
         print(f"Found {len(left_frames)} frames in left directory and {len(right_frames)} frames in right directory")
         
-        # Get video properties from first frame
-        first_frame = cv2.imread(os.path.join(temp_left, left_frames[0]))
-        if first_frame is None:
-            raise ValueError(f"Could not read first frame from {left_frames[0]}")
-            
-        height, width = first_frame.shape[:2]
-        fps = 24
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
-        
         # Process each frame pair
-        for left_frame, right_frame in tqdm(zip(left_frames, right_frames), total=len(left_frames), desc="Creating anaglyph"):
+        anaglyph_frames = []
+        for i, (left_frame, right_frame) in enumerate(tqdm(zip(left_frames, right_frames), total=len(left_frames), desc="Creating anaglyph")):
             # Read frames
             left = cv2.imread(os.path.join(temp_left, left_frame))
             right = cv2.imread(os.path.join(temp_right, right_frame))
@@ -431,22 +424,21 @@ def create_anaglyph(left_dir, right_dir, output_path):
                 print(f"Warning: Could not read frame {left_frame} or {right_frame}")
                 continue
             
-            # Ensure we're working with RGB images
-            if left.shape[2] == 4:
-                left = cv2.cvtColor(left, cv2.COLOR_RGBA2RGB)
-            if right.shape[2] == 4:
-                right = cv2.cvtColor(right, cv2.COLOR_RGBA2RGB)
+            # Convert BGR to RGB
+            left = cv2.cvtColor(left, cv2.COLOR_BGR2RGB)
+            right = cv2.cvtColor(right, cv2.COLOR_BGR2RGB)
             
-            # Create red-cyan anaglyph
+            # Create red-cyan anaglyph (red from left, green+blue from right)
             anaglyph = np.zeros_like(left)
-            anaglyph[:, :, 2] = left[:, :, 2]   # Red from left
+            anaglyph[:, :, 0] = left[:, :, 0]   # Red from left
             anaglyph[:, :, 1] = right[:, :, 1]  # Green from right
-            anaglyph[:, :, 0] = right[:, :, 0]  # Blue from right
+            anaglyph[:, :, 2] = right[:, :, 2]  # Blue from right
             
-            # Write frame to video
-            out.write(anaglyph)
+            anaglyph_frames.append(anaglyph)
         
-        out.release()
+        # Save video using imageio
+        import imageio
+        imageio.mimwrite(output_path, anaglyph_frames, fps=24, quality=7)
         print(f"Red-cyan anaglyph video saved to {output_path}")
         
     finally:
@@ -455,14 +447,18 @@ def create_anaglyph(left_dir, right_dir, output_path):
             shutil.rmtree(temp_left)
         if os.path.exists(temp_right):
             shutil.rmtree(temp_right)
+        if os.path.exists(temp_anaglyph):
+            shutil.rmtree(temp_anaglyph)
 
 def create_stereo_pair(left_dir, right_dir, output_path):
     """Create side-by-side stereo pair video"""
     # Create temporary directories for frames
     temp_left = os.path.join(os.path.dirname(output_path), 'temp_left')
     temp_right = os.path.join(os.path.dirname(output_path), 'temp_right')
+    temp_stereo = os.path.join(os.path.dirname(output_path), 'temp_stereo')
     os.makedirs(temp_left, exist_ok=True)
     os.makedirs(temp_right, exist_ok=True)
+    os.makedirs(temp_stereo, exist_ok=True)
     
     try:
         # Extract frames from videos
@@ -490,16 +486,9 @@ def create_stereo_pair(left_dir, right_dir, output_path):
         
         print(f"Found {len(left_frames)} frames in left directory and {len(right_frames)} frames in right directory")
         
-        first_frame = cv2.imread(os.path.join(temp_left, left_frames[0]))
-        if first_frame is None:
-            raise ValueError(f"Could not read first frame from {left_frames[0]}")
-            
-        height, width = first_frame.shape[:2]
-        fps = 24
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        out = cv2.VideoWriter(output_path, fourcc, fps, (width*2, height))
-        
-        for left_frame, right_frame in tqdm(zip(left_frames, right_frames), total=len(left_frames), desc="Creating stereo pair"):
+        # Process each frame pair
+        stereo_frames = []
+        for i, (left_frame, right_frame) in enumerate(tqdm(zip(left_frames, right_frames), total=len(left_frames), desc="Creating stereo pair")):
             left = cv2.imread(os.path.join(temp_left, left_frame))
             right = cv2.imread(os.path.join(temp_right, right_frame))
             
@@ -507,17 +496,17 @@ def create_stereo_pair(left_dir, right_dir, output_path):
                 print(f"Warning: Could not read frame {left_frame} or {right_frame}")
                 continue
             
-            # Ensure we're working with RGB images
-            if left.shape[2] == 4:
-                left = cv2.cvtColor(left, cv2.COLOR_RGBA2RGB)
-            if right.shape[2] == 4:
-                right = cv2.cvtColor(right, cv2.COLOR_RGBA2RGB)
+            # Convert BGR to RGB
+            left = cv2.cvtColor(left, cv2.COLOR_BGR2RGB)
+            right = cv2.cvtColor(right, cv2.COLOR_BGR2RGB)
             
             # Create side-by-side stereo pair
             stereo = np.concatenate((left, right), axis=1)
-            out.write(stereo)
+            stereo_frames.append(stereo)
         
-        out.release()
+        # Save video using imageio
+        import imageio
+        imageio.mimwrite(output_path, stereo_frames, fps=24, quality=7)
         print(f"Stereo pair video saved to {output_path}")
         
     finally:
@@ -526,6 +515,8 @@ def create_stereo_pair(left_dir, right_dir, output_path):
             shutil.rmtree(temp_left)
         if os.path.exists(temp_right):
             shutil.rmtree(temp_right)
+        if os.path.exists(temp_stereo):
+            shutil.rmtree(temp_stereo)
 
 def cleanup_temp_files(dirs):
     """Clean up temporary files and directories"""

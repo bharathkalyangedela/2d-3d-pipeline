@@ -461,25 +461,36 @@ def create_stereo_pair(left_dir, right_dir, output_path):
     os.makedirs(temp_stereo, exist_ok=True)
     
     try:
-        # Extract frames from videos
-        left_videos = sorted([f for f in os.listdir(left_dir) if f.endswith('.mp4')])
-        right_videos = sorted([f for f in os.listdir(right_dir) if f.endswith('.mp4')])
+        # First check for individual frames
+        left_frames = sorted([f for f in os.listdir(left_dir) if f.startswith('left_') and f.endswith('.png')])
+        right_frames = sorted([f for f in os.listdir(right_dir) if f.startswith('right_') and f.endswith('.png')])
         
-        if not left_videos or not right_videos:
-            raise ValueError(f"No video files found in {left_dir} or {right_dir}")
-        
-        # Extract frames from all videos
-        for video in left_videos:
-            video_path = os.path.join(left_dir, video)
-            extract_frames_from_video(video_path, temp_left)
-        
-        for video in right_videos:
-            video_path = os.path.join(right_dir, video)
-            extract_frames_from_video(video_path, temp_right)
-        
-        # Get frame lists
-        left_frames = sorted([f for f in os.listdir(temp_left) if f.endswith('.png')])
-        right_frames = sorted([f for f in os.listdir(temp_right) if f.endswith('.png')])
+        if not left_frames and not right_frames:
+            # If no individual frames found, check for videos
+            left_videos = sorted([f for f in os.listdir(left_dir) if f.endswith('.mp4')])
+            right_videos = sorted([f for f in os.listdir(right_dir) if f.endswith('.mp4')])
+            
+            if not left_videos or not right_videos:
+                raise ValueError(f"No video files or frames found in {left_dir} or {right_dir}")
+            
+            # Extract frames from all videos
+            for video in left_videos:
+                video_path = os.path.join(left_dir, video)
+                extract_frames_from_video(video_path, temp_left)
+            
+            for video in right_videos:
+                video_path = os.path.join(right_dir, video)
+                extract_frames_from_video(video_path, temp_right)
+            
+            # Get frame lists from extracted videos
+            left_frames = sorted([f for f in os.listdir(temp_left) if f.endswith('.png')])
+            right_frames = sorted([f for f in os.listdir(temp_right) if f.endswith('.png')])
+        else:
+            # Copy individual frames to temp directories
+            for frame in left_frames:
+                shutil.copy(os.path.join(left_dir, frame), os.path.join(temp_left, frame))
+            for frame in right_frames:
+                shutil.copy(os.path.join(right_dir, frame), os.path.join(temp_right, frame))
         
         if not left_frames or not right_frames:
             raise ValueError(f"No frames found in temporary directories")

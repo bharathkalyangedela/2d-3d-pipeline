@@ -112,6 +112,10 @@ def shift_image_with_transparency(img, depth_img, shift_amount, direction='left'
     height, width = img.shape[:2]
     result = np.zeros((height, width, 4), dtype=np.uint8)
     
+    # If depth_img is 3D (frames, height, width), use the first frame
+    if len(depth_img.shape) == 3:
+        depth_img = depth_img[0]  # Use first frame's depth map
+    
     depth_norm = (depth_img - depth_img.min()) / (depth_img.max() - depth_img.min())
     shifts = (depth_norm * shift_amount).astype(np.int32)
     
@@ -198,54 +202,64 @@ def extract_frames_from_video(video_path, output_dir, start_frame=0):
 
 def process_batch(batch_num, input_base, mask_base, output_base, batch_size=60, propainter_params=None, view_type='left'):
     """Process a batch of frames using ProPainter"""
+    print(f"\n[DEBUG] Starting batch {batch_num} processing for {view_type} view")
+    print(f"[DEBUG] Input base: {input_base}")
+    print(f"[DEBUG] Mask base: {mask_base}")
+    print(f"[DEBUG] Output base: {output_base}")
+    
     # Ensure output directory exists
     os.makedirs(output_base, exist_ok=True)
     
     # Check if batch already processed
     if check_batch_outputs(batch_num, output_base, batch_size):
-        print(f"Skipping batch {batch_num} - already processed")
+        print(f"[DEBUG] Batch {batch_num} already processed, skipping")
         return
     
     # Get total number of frames
     frame_files = sorted([f for f in os.listdir(input_base) if f.startswith(f'{view_type}_') and f.endswith('.png')])
     total_frames = len(frame_files)
+    print(f"[DEBUG] Found {total_frames} frames for {view_type} view")
     
     # Calculate start and end indices for this batch
     start_idx = batch_num * batch_size
     end_idx = min(start_idx + batch_size, total_frames)
+    print(f"[DEBUG] Processing frames {start_idx} to {end_idx}")
     
     # Skip if we've processed all frames
     if start_idx >= total_frames:
-        print(f"Batch {batch_num} skipped - all frames processed")
+        print(f"[DEBUG] Batch {batch_num} skipped - all frames processed")
         return
     
     # Calculate actual batch size for this batch
     actual_batch_size = end_idx - start_idx
+    print(f"[DEBUG] Actual batch size: {actual_batch_size}")
     
     # If this is the last batch and it's too small (less than 2 frames), merge with previous batch
     if actual_batch_size < 2 and batch_num > 0:
-        print(f"Last batch too small ({actual_batch_size} frames), merging with previous batch")
+        print(f"[DEBUG] Last batch too small ({actual_batch_size} frames), merging with previous batch")
         return
     
     batch_dir = os.path.abspath(f"{input_base}/batches/batch_{batch_num}")
     output_dir = os.path.abspath(f"{output_base}/batch_{batch_num}")
     batch_mask_dir = os.path.abspath(f"{mask_base}/batches/batch_{batch_num}")
     
+    print(f"[DEBUG] Batch directories:")
+    print(f"[DEBUG] - Batch dir: {batch_dir}")
+    print(f"[DEBUG] - Output dir: {output_dir}")
+    print(f"[DEBUG] - Mask dir: {batch_mask_dir}")
+    
     # Clean up any existing incomplete batch directories
     for d in [batch_dir, batch_mask_dir, output_dir]:
         if os.path.exists(d):
+            print(f"[DEBUG] Cleaning up existing directory: {d}")
             shutil.rmtree(d)
     
     os.makedirs(batch_dir, exist_ok=True)
     os.makedirs(batch_mask_dir, exist_ok=True)
     os.makedirs(output_dir, exist_ok=True)
     
-    print(f"Created batch directories for {view_type} view:")
-    print(f"  - Batch dir: {batch_dir}")
-    print(f"  - Output dir: {output_dir}")
-    print(f"  - Mask dir: {batch_mask_dir}")
-    
     # Copy frames and masks to batch directories
+    print("\n[DEBUG] Copying frames and masks to batch directories")
     for i in range(actual_batch_size):
         idx = start_idx + i
         
@@ -253,18 +267,20 @@ def process_batch(batch_num, input_base, mask_base, output_base, batch_size=60, 
         frame_src = os.path.join(input_base, f'{view_type}_{idx:04d}.png')
         frame_dst = os.path.join(batch_dir, f'frame_{i:04d}.png')
         if os.path.exists(frame_src):
+            print(f"[DEBUG] Copying frame {idx} to {frame_dst}")
             shutil.copy(frame_src, frame_dst)
         else:
-            print(f"Warning: Frame file not found: {frame_src}")
+            print(f"[DEBUG] Warning: Frame file not found: {frame_src}")
             continue
         
         # Copy mask with consistent naming
         mask_src = os.path.join(mask_base, f'mask_{idx:04d}.png')
         mask_dst = os.path.join(batch_mask_dir, f'mask_{i:04d}.png')
         if os.path.exists(mask_src):
+            print(f"[DEBUG] Copying mask {idx} to {mask_dst}")
             shutil.copy(mask_src, mask_dst)
         else:
-            print(f"Warning: Mask file not found: {mask_src}")
+            print(f"[DEBUG] Warning: Mask file not found: {mask_src}")
     
     try:
         # Run ProPainter with properly quoted paths
@@ -279,7 +295,8 @@ def process_batch(batch_num, input_base, mask_base, output_base, batch_size=60, 
               f"--save_fps {propainter_params['save_fps']} " \
               f"--raft_iter {propainter_params['raft_iter']}"
         
-        print(f"Running ProPainter command for {view_type} view: {cmd}")
+        print(f"\n[DEBUG] Running ProPainter command:")
+        print(f"[DEBUG] {cmd}")
         subprocess.run(cmd, shell=True, check=True)
         
         # Wait a moment for files to be written
@@ -288,27 +305,31 @@ def process_batch(batch_num, input_base, mask_base, output_base, batch_size=60, 
         # Verify the output was created successfully
         batch_results_dir = os.path.join(output_dir, f'batch_{batch_num}')
         if not os.path.exists(batch_results_dir):
-            print(f"Warning: ProPainter output directory not found: {batch_results_dir}")
+            print(f"[DEBUG] Warning: ProPainter output directory not found: {batch_results_dir}")
             raise RuntimeError(f"ProPainter did not create output directory for batch {batch_num}")
             
         # Look for inpainted video file
-        if not os.path.exists(os.path.join(batch_results_dir, 'inpaint_out.mp4')):
-            print(f"Warning: Inpainted video not found in {batch_results_dir}")
+        video_path = os.path.join(batch_results_dir, 'inpaint_out.mp4')
+        if not os.path.exists(video_path):
+            print(f"[DEBUG] Warning: Inpainted video not found in {batch_results_dir}")
             raise RuntimeError(f"ProPainter did not generate inpainted video for batch {batch_num}")
             
-        print(f"Successfully processed batch {batch_num} for {view_type} view")
+        print(f"[DEBUG] Successfully processed batch {batch_num} for {view_type} view")
+        print(f"[DEBUG] Output video: {video_path}")
             
     except Exception as e:
-        print(f"Error processing batch {batch_num} for {view_type} view: {str(e)}")
+        print(f"[DEBUG] Error processing batch {batch_num} for {view_type} view: {str(e)}")
         # Clean up failed batch
         for d in [batch_dir, batch_mask_dir, output_dir]:
             if os.path.exists(d):
+                print(f"[DEBUG] Cleaning up failed batch directory: {d}")
                 shutil.rmtree(d)
         raise
     finally:
         # Clean up temporary directories
         for d in [batch_dir, batch_mask_dir]:
             if os.path.exists(d):
+                print(f"[DEBUG] Cleaning up temporary directory: {d}")
                 shutil.rmtree(d)
 
 def combine_batches(batch_base, output_dir):
@@ -452,6 +473,11 @@ def create_anaglyph(left_dir, right_dir, output_path):
 
 def create_stereo_pair(left_dir, right_dir, output_path):
     """Create side-by-side stereo pair video"""
+    print(f"\n[DEBUG] Starting create_stereo_pair")
+    print(f"[DEBUG] Left directory: {left_dir}")
+    print(f"[DEBUG] Right directory: {right_dir}")
+    print(f"[DEBUG] Output path: {output_path}")
+    
     # Create temporary directories for frames
     temp_left = os.path.join(os.path.dirname(output_path), 'temp_left')
     temp_right = os.path.join(os.path.dirname(output_path), 'temp_right')
@@ -461,50 +487,77 @@ def create_stereo_pair(left_dir, right_dir, output_path):
     os.makedirs(temp_stereo, exist_ok=True)
     
     try:
-        # First check for individual frames
-        left_frames = sorted([f for f in os.listdir(left_dir) if f.startswith('left_') and f.endswith('.png')])
-        right_frames = sorted([f for f in os.listdir(right_dir) if f.startswith('right_') and f.endswith('.png')])
+        # First check for processed videos in results directories
+        print(f"\n[DEBUG] Checking for videos in directories:")
+        left_videos = sorted([f for f in os.listdir(left_dir) if f == 'combined_output.mp4'])
+        right_videos = sorted([f for f in os.listdir(right_dir) if f == 'combined_output.mp4'])
+        print(f"[DEBUG] Found left videos: {left_videos}")
+        print(f"[DEBUG] Found right videos: {right_videos}")
         
-        if not left_frames and not right_frames:
-            # If no individual frames found, check for videos
-            left_videos = sorted([f for f in os.listdir(left_dir) if f.endswith('.mp4')])
-            right_videos = sorted([f for f in os.listdir(right_dir) if f.endswith('.mp4')])
+        if not left_videos and not right_videos:
+            print("\n[DEBUG] No videos found, checking for individual frames")
+            # If no videos found in results directories, check for individual frames
+            left_frames = sorted([f for f in os.listdir(left_dir) if f.startswith('left_') and f.endswith('.png')])
+            right_frames = sorted([f for f in os.listdir(right_dir) if f.startswith('right_') and f.endswith('.png')])
+            print(f"[DEBUG] Found left frames: {left_frames[:5]}... (total: {len(left_frames)})")
+            print(f"[DEBUG] Found right frames: {right_frames[:5]}... (total: {len(right_frames)})")
             
-            if not left_videos or not right_videos:
+            if not left_frames and not right_frames:
                 raise ValueError(f"No video files or frames found in {left_dir} or {right_dir}")
             
-            # Extract frames from all videos
+            # Copy individual frames to temp directories
+            print("\n[DEBUG] Copying individual frames to temp directories")
+            for frame in left_frames:
+                src = os.path.join(left_dir, frame)
+                dst = os.path.join(temp_left, frame)
+                print(f"[DEBUG] Copying left frame: {src} -> {dst}")
+                shutil.copy(src, dst)
+            for frame in right_frames:
+                src = os.path.join(right_dir, frame)
+                dst = os.path.join(temp_right, frame)
+                print(f"[DEBUG] Copying right frame: {src} -> {dst}")
+                shutil.copy(src, dst)
+            
+            # Get frame lists from copied frames
+            left_frames = sorted([f for f in os.listdir(temp_left) if f.endswith('.png')])
+            right_frames = sorted([f for f in os.listdir(temp_right) if f.endswith('.png')])
+        else:
+            # Extract frames from processed videos
+            print("\n[DEBUG] Extracting frames from processed videos")
             for video in left_videos:
                 video_path = os.path.join(left_dir, video)
+                print(f"[DEBUG] Extracting frames from left video: {video_path}")
                 extract_frames_from_video(video_path, temp_left)
             
             for video in right_videos:
                 video_path = os.path.join(right_dir, video)
+                print(f"[DEBUG] Extracting frames from right video: {video_path}")
                 extract_frames_from_video(video_path, temp_right)
             
             # Get frame lists from extracted videos
             left_frames = sorted([f for f in os.listdir(temp_left) if f.endswith('.png')])
             right_frames = sorted([f for f in os.listdir(temp_right) if f.endswith('.png')])
-        else:
-            # Copy individual frames to temp directories
-            for frame in left_frames:
-                shutil.copy(os.path.join(left_dir, frame), os.path.join(temp_left, frame))
-            for frame in right_frames:
-                shutil.copy(os.path.join(right_dir, frame), os.path.join(temp_right, frame))
+            print(f"[DEBUG] Extracted {len(left_frames)} left frames and {len(right_frames)} right frames")
         
         if not left_frames or not right_frames:
             raise ValueError(f"No frames found in temporary directories")
         
-        print(f"Found {len(left_frames)} frames in left directory and {len(right_frames)} frames in right directory")
+        print(f"\n[DEBUG] Processing frame pairs")
+        print(f"[DEBUG] First left frame: {left_frames[0]}")
+        print(f"[DEBUG] First right frame: {right_frames[0]}")
         
         # Process each frame pair
         stereo_frames = []
         for i, (left_frame, right_frame) in enumerate(tqdm(zip(left_frames, right_frames), total=len(left_frames), desc="Creating stereo pair")):
-            left = cv2.imread(os.path.join(temp_left, left_frame))
-            right = cv2.imread(os.path.join(temp_right, right_frame))
+            left_path = os.path.join(temp_left, left_frame)
+            right_path = os.path.join(temp_right, right_frame)
+            left = cv2.imread(left_path)
+            right = cv2.imread(right_path)
             
             if left is None or right is None:
-                print(f"Warning: Could not read frame {left_frame} or {right_frame}")
+                print(f"[DEBUG] Warning: Could not read frame pair {i}:")
+                print(f"[DEBUG] Left frame: {left_path}")
+                print(f"[DEBUG] Right frame: {right_path}")
                 continue
             
             # Convert BGR to RGB
@@ -514,20 +567,26 @@ def create_stereo_pair(left_dir, right_dir, output_path):
             # Create side-by-side stereo pair
             stereo = np.concatenate((left, right), axis=1)
             stereo_frames.append(stereo)
+            
+            if i == 0:
+                print(f"[DEBUG] First frame dimensions:")
+                print(f"[DEBUG] Left frame shape: {left.shape}")
+                print(f"[DEBUG] Right frame shape: {right.shape}")
+                print(f"[DEBUG] Combined stereo shape: {stereo.shape}")
         
         # Save video using imageio
+        print(f"\n[DEBUG] Saving stereo pair video to: {output_path}")
         import imageio
         imageio.mimwrite(output_path, stereo_frames, fps=24, quality=7)
-        print(f"Stereo pair video saved to {output_path}")
+        print(f"[DEBUG] Successfully saved stereo pair video")
         
     finally:
         # Clean up temporary directories
-        if os.path.exists(temp_left):
-            shutil.rmtree(temp_left)
-        if os.path.exists(temp_right):
-            shutil.rmtree(temp_right)
-        if os.path.exists(temp_stereo):
-            shutil.rmtree(temp_stereo)
+        print("\n[DEBUG] Cleaning up temporary directories")
+        for temp_dir in [temp_left, temp_right, temp_stereo]:
+            if os.path.exists(temp_dir):
+                shutil.rmtree(temp_dir)
+                print(f"[DEBUG] Removed temporary directory: {temp_dir}")
 
 def cleanup_temp_files(dirs):
     """Clean up temporary files and directories"""
@@ -603,42 +662,60 @@ def main():
     
     args = parser.parse_args()
     
+    print("\n[DEBUG] Starting 3D conversion pipeline")
+    print(f"[DEBUG] Input video: {args.video}")
+    print(f"[DEBUG] Depth folder: {args.depth_folder}")
+    print(f"[DEBUG] Output directory: {args.output_dir}")
+    
     # Setup logging
     logger = setup_logging(args.output_dir)
     
     try:
         # Validate inputs and check depth format
+        print("\n[DEBUG] Validating inputs...")
         single_npy, depth_path = validate_inputs(args.video, args.depth_folder)
+        print(f"[DEBUG] Single .npy file: {single_npy}")
+        print(f"[DEBUG] Depth path: {depth_path}")
         
         # Create directories
+        print("\n[DEBUG] Creating directories...")
         dirs = create_directories(args.output_dir)
+        for name, path in dirs.items():
+            print(f"[DEBUG] Created directory {name}: {path}")
         
         # Check for existing files
         existing_files = check_existing_files(dirs)
+        print(f"\n[DEBUG] Existing files check:")
+        print(f"[DEBUG] Has pairs: {existing_files['has_pairs']}")
+        print(f"[DEBUG] Has masks: {existing_files['has_masks']}")
+        print(f"[DEBUG] Number of pairs: {existing_files['num_pairs']}")
+        print(f"[DEBUG] Number of masks: {existing_files['num_masks']}")
         
         if not existing_files['has_pairs']:
             # Extract frames from video
-            logger.info("Extracting frames from video...")
+            print("\n[DEBUG] Extracting frames from video...")
             total_frames = extract_frames(args.video, dirs['stereo_output'])
+            print(f"[DEBUG] Extracted {total_frames} frames")
             
             # Generate stereo pairs
-            logger.info("Generating stereo pairs...")
+            print("\n[DEBUG] Generating stereo pairs...")
             
             if single_npy:
                 # Load single .npy file
+                print("[DEBUG] Loading single .npy depth file")
                 all_depths = np.load(depth_path)
-                if len(all_depths.shape) != 3:
-                    raise ValueError("Single .npy file must contain 3D array of depth maps")
-                if all_depths.shape[0] != total_frames:
-                    raise ValueError(f"Number of depth maps ({all_depths.shape[0]}) does not match number of frames ({total_frames})")
+                print(f"[DEBUG] Loaded depth array shape: {all_depths.shape}")
             else:
                 # Get individual depth files
+                print("[DEBUG] Loading individual depth files")
                 depth_files = sorted([f for f in os.listdir(depth_path) if f.endswith(('.npy', '.exr'))])
-                if len(depth_files) != total_frames:
-                    raise ValueError(f"Number of depth maps ({len(depth_files)}) does not match number of frames ({total_frames})")
+                print(f"[DEBUG] Found {len(depth_files)} depth files")
             
+            print("\n[DEBUG] Processing frames and creating stereo pairs...")
             for i in range(total_frames):
                 frame_path = os.path.join(dirs['stereo_output'], f'frame_{i:04d}.png')
+                print(f"[DEBUG] Processing frame {i}: {frame_path}")
+                
                 frame = cv2.imread(frame_path)
                 frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 
@@ -646,13 +723,25 @@ def main():
                     depth = all_depths[i]
                 else:
                     depth_file = os.path.join(depth_path, depth_files[i])
+                    print(f"[DEBUG] Loading depth from: {depth_file}")
                     depth = read_depth_file(depth_file)
                 
+                # Resize frame to match depth map dimensions
+                depth_height, depth_width = depth.shape[:2]
+                frame = cv2.resize(frame, (depth_width, depth_height))
+                print(f"[DEBUG] Resized frame to match depth map dimensions: {depth_width}x{depth_height}")
+                
+                print(f"[DEBUG] Creating left and right views for frame {i}")
                 left_img = shift_image_with_transparency(frame, depth, args.shift_amount, 'left')
                 right_img = shift_image_with_transparency(frame, depth, args.shift_amount, 'right')
                 
-                cv2.imwrite(os.path.join(dirs['stereo_output'], f'right_{i:04d}.png'), cv2.cvtColor(left_img, cv2.COLOR_RGBA2BGRA))
-                cv2.imwrite(os.path.join(dirs['stereo_output'], f'left_{i:04d}.png'), cv2.cvtColor(right_img, cv2.COLOR_RGBA2BGRA))
+                left_path = os.path.join(dirs['stereo_output'], f'left_{i:04d}.png')
+                right_path = os.path.join(dirs['stereo_output'], f'right_{i:04d}.png')
+                print(f"[DEBUG] Saving left view to: {left_path}")
+                print(f"[DEBUG] Saving right view to: {right_path}")
+                
+                cv2.imwrite(left_path, cv2.cvtColor(left_img, cv2.COLOR_RGBA2BGRA))
+                cv2.imwrite(right_path, cv2.cvtColor(right_img, cv2.COLOR_RGBA2BGRA))
                 
                 if i % 10 == 0:
                     logger.info(f"Processed {i}/{total_frames} frames")
@@ -662,7 +751,7 @@ def main():
         
         if not existing_files['has_masks']:
             # Create masks
-            logger.info("Creating masks...")
+            print("\n[DEBUG] Creating masks...")
             create_masks_from_transparent(
                 dirs['stereo_output'], 
                 dirs['masks_left'],
@@ -686,44 +775,42 @@ def main():
             'raft_iter': args.raft_iter
         }
         
-        # Calculate number of batches based on actual frame count
+        # Calculate number of batches
         num_batches = (total_frames + args.batch_size - 1) // args.batch_size
+        print(f"\n[DEBUG] Processing {num_batches} batches for {total_frames} frames")
         
-        # Check if last batch would be too small (less than 2 frames)
-        last_batch_size = total_frames % args.batch_size
-        if last_batch_size > 0 and last_batch_size < 2:
-            num_batches -= 1  # Reduce number of batches to merge small last batch
-        
-        logger.info(f"Processing {num_batches} batches for {total_frames} frames...")
-        
-        # Process batches for left and right views separately
-        logger.info(f"Processing {num_batches} batches for left view...")
+        # Process batches for left and right views
+        print("\n[DEBUG] Processing left view batches...")
         for batch_num in range(num_batches):
-            logger.info(f"Processing batch {batch_num + 1}/{num_batches} for left view...")
+            print(f"[DEBUG] Processing batch {batch_num + 1}/{num_batches} for left view")
             process_batch(batch_num, dirs['stereo_output'], dirs['masks_left'], 
                          dirs['results_left'], args.batch_size, propainter_params, 'left')
         
-        logger.info(f"Processing {num_batches} batches for right view...")
+        print("\n[DEBUG] Processing right view batches...")
         for batch_num in range(num_batches):
-            logger.info(f"Processing batch {batch_num + 1}/{num_batches} for right view...")
+            print(f"[DEBUG] Processing batch {batch_num + 1}/{num_batches} for right view")
             process_batch(batch_num, dirs['stereo_output'], dirs['masks_right'], 
                          dirs['results_right'], args.batch_size, propainter_params, 'right')
         
         # Combine batches
-        logger.info("Combining batches...")
+        print("\n[DEBUG] Combining batches...")
         combine_batches(dirs['results_left'], dirs['combined_left'])
         combine_batches(dirs['results_right'], dirs['combined_right'])
         
         # Create final outputs
-        logger.info("Creating final outputs...")
+        print("\n[DEBUG] Creating final outputs...")
         create_anaglyph(
             dirs['combined_right'],
             dirs['combined_left'],
             os.path.join(args.output_dir, 'anaglyph_output.mp4')
         )
+        
+        print("\n[DEBUG] Creating stereo pair...")
+        print(f"[DEBUG] Left view directory: {dirs['combined_left']}")
+        print(f"[DEBUG] Right view directory: {dirs['combined_right']}")
         create_stereo_pair(
-            dirs['combined_right'],
             dirs['combined_left'],
+            dirs['combined_right'],
             os.path.join(args.output_dir, 'stereo_pair_output.mp4')
         )
         
